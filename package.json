@@ -6,7 +6,10 @@
   "main": "./electron/main.js",
   "homepage": "./",
   "description": "Sistema de multilogin avançado estilo Netflix",
-  "author": "Sidnei Inc",
+  "author": {
+    "name": "Sidnei Inc",
+    "email": "sidnei@example.com"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "axios": "^1.6.0",
