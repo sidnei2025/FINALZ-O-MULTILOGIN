@@ -739,10 +739,14 @@ const App: React.FC = () => {
    };
 
    const handleManualSync = async () => {
-      setToast({ msg: 'Puxando dados...', type: 'info' });
+      setToast({ msg: '🔄 Buscando dados atualizados do servidor...', type: 'info' });
+
+      // 🔥 CRITICAL: Invalidar cache ANTES de buscar, para forçar ida ao Supabase
+      DataService.invalidateCache();
+
       await refreshData();
       if (currentUser?.role === Role.ADMIN || currentUser?.role === Role.RESELLER) await fetchRadarLogs();
-      setToast({ msg: 'Sincronizado!', type: 'success' });
+      setToast({ msg: '✅ Dados sincronizados do servidor!', type: 'success' });
    };
 
    const handlePushCacheToCloud = async () => {
@@ -961,6 +965,8 @@ const App: React.FC = () => {
                         <a href={currentSupportLink} target="_blank" rel="noreferrer" className="flex items-center gap-3 px-6 py-2.5 bg-green-600/10 border border-green-500/30 rounded-2xl text-green-400 hover:bg-green-600 hover:text-white transition-all"> <HelpCircle size={18} /> <span className="text-[10px] font-black uppercase">Suporte</span> </a>
                      </div>
                      <div className="flex items-center gap-4">
+                        {/* 🔄 BOTÃO SINCRONIZAR - VISÍVEL PARA TODOS */}
+                        <button onClick={handleManualSync} title="Sincronizar dados da Cloud" className="flex items-center gap-2 px-4 py-2.5 bg-cyan-600/10 border border-cyan-500/30 rounded-xl text-cyan-400 hover:bg-cyan-600 hover:text-white transition-all text-[9px] font-black uppercase"><RefreshCw size={14} /> Sincronizar</button>
                         {isAdmin && (
                            <div className="flex gap-2 mr-4 border-r border-white/10 pr-4">
                               <button onClick={handleManualSync} title="Puxar dados da Cloud" className="flex items-center gap-2 px-4 py-2 bg-blue-600/10 border border-blue-500/30 rounded-xl text-blue-400 hover:bg-blue-600 hover:text-white transition-all text-[9px] font-black uppercase"><DownloadCloud size={14} /> Puxar Cloud</button>

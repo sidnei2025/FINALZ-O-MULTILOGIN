@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { RefreshCw, ShieldCheck, Lock, ChevronLeft, ChevronRight, Globe, Key, UploadCloud, Database, MessageSquare, Ban, X, Power, PlayCircle, MessageCircle, Download, CheckCircle, AlertCircle } from 'lucide-react';
+import { RefreshCw, ShieldCheck, Lock, ChevronLeft, ChevronRight, Globe, Key, UploadCloud, Database, MessageSquare, Ban, X, Power, PlayCircle, MessageCircle, Download, CheckCircle, AlertCircle, Search, ChevronUp, ChevronDown } from 'lucide-react';
 import { Profile } from '../types';
 
 interface BrowserWindowProps {
@@ -35,6 +35,12 @@ export const BrowserWindow: React.FC<BrowserWindowProps> = ({ profile, isVisible
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRestoringSession, setIsRestoringSession] = useState(true);
+
+  // 🔍 ESTADOS PARA PESQUISA (Ctrl+F)
+  const [showSearchBar, setShowSearchBar] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState<{ activeMatchOrdinal: number; matches: number }>({ activeMatchOrdinal: 0, matches: 0 });
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const dragStartRef = useRef({ x: 0, y: 0, winX: 0, winY: 0, w: 0, h: 0 });
   const webviewRefs = useRef<Array<any | null>>([]);
@@ -180,6 +186,90 @@ export const BrowserWindow: React.FC<BrowserWindowProps> = ({ profile, isVisible
       if (onToast) onToast('Script Iniciado!', 'success');
     } catch (e) { if (onToast) onToast('Erro no Script', 'error'); }
   };
+
+  // 🔍 FUNÇÕES DE PESQUISA (Ctrl+F)
+  const handleSearch = (term: string) => {
+    const activeWebview = webviewRefs.current[activeTabIndex];
+    if (!activeWebview || !term) {
+      if (activeWebview) activeWebview.stopFindInPage('clearSelection');
+      setSearchResults({ activeMatchOrdinal: 0, matches: 0 });
+      return;
+    }
+    activeWebview.findInPage(term);
+  };
+
+  const handleSearchNext = () => {
+    const activeWebview = webviewRefs.current[activeTabIndex];
+    if (activeWebview && searchTerm) {
+      activeWebview.findInPage(searchTerm, { forward: true, findNext: true });
+    }
+  };
+
+  const handleSearchPrev = () => {
+    const activeWebview = webviewRefs.current[activeTabIndex];
+    if (activeWebview && searchTerm) {
+      activeWebview.findInPage(searchTerm, { forward: false, findNext: true });
+    }
+  };
+
+  const closeSearch = () => {
+    const activeWebview = webviewRefs.current[activeTabIndex];
+    if (activeWebview) activeWebview.stopFindInPage('clearSelection');
+    setShowSearchBar(false);
+    setSearchTerm('');
+    setSearchResults({ activeMatchOrdinal: 0, matches: 0 });
+  };
+
+  // 🔍 LISTENER PARA Ctrl+F
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isVisible) return;
+
+      // Ctrl+F ou Cmd+F abre pesquisa
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowSearchBar(true);
+        setTimeout(() => searchInputRef.current?.focus(), 100);
+        return;
+      }
+
+      // Escape fecha pesquisa
+      if (e.key === 'Escape' && showSearchBar) {
+        closeSearch();
+        return;
+      }
+
+      // Enter vai para próximo resultado
+      if (e.key === 'Enter' && showSearchBar) {
+        e.shiftKey ? handleSearchPrev() : handleSearchNext();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isVisible, showSearchBar, searchTerm]);
+
+  // 🔍 LISTENER PARA RESULTADO DE BUSCA DO WEBVIEW
+  useEffect(() => {
+    const activeWebview = webviewRefs.current[activeTabIndex];
+    if (!activeWebview) return;
+
+    const handleFoundInPage = (event: any) => {
+      if (event.result) {
+        setSearchResults({
+          activeMatchOrdinal: event.result.activeMatchOrdinal || 0,
+          matches: event.result.matches || 0
+        });
+      }
+    };
+
+    activeWebview.addEventListener('found-in-page', handleFoundInPage);
+    return () => {
+      activeWebview.removeEventListener?.('found-in-page', handleFoundInPage);
+    };
+  }, [activeTabIndex, isReadyToNavigate]);
 
   useEffect(() => {
     if (!isReadyToNavigate) return;
@@ -529,6 +619,14 @@ export const BrowserWindow: React.FC<BrowserWindowProps> = ({ profile, isVisible
         </div>
 
         <div className="flex gap-1">
+          {/* 🔍 BOTÃO DE PESQUISA */}
+          <button
+            onClick={() => { setShowSearchBar(!showSearchBar); if (!showSearchBar) setTimeout(() => searchInputRef.current?.focus(), 100); }}
+            className={`p-1.5 rounded ${showSearchBar ? 'text-cyan-400 bg-cyan-900/20' : 'text-gray-400 hover:text-white'}`}
+            title="Pesquisar (Ctrl+F)"
+          >
+            <Search size={16} />
+          </button>
           {profile.discordToken && (
             <button onClick={() => executeDiscordTokenLogin(activeWebview)} className="p-1.5 rounded text-indigo-400 hover:bg-indigo-900/20 transition-all" title="Login Discord">
               <MessageCircle size={16} />
@@ -545,6 +643,34 @@ export const BrowserWindow: React.FC<BrowserWindowProps> = ({ profile, isVisible
           <button onClick={() => setAutoFillEnabled(!autoFillEnabled)} className={`p-1.5 rounded ${autoFillEnabled ? 'text-green-500 bg-green-900/10' : 'text-gray-500'}`} title="Auto-Preenchimento"><Key size={16} /></button>
         </div>
       </div>
+
+      {/* 🔍 BARRA DE PESQUISA */}
+      {showSearchBar && (
+        <div className="h-10 bg-[#252525] flex items-center px-3 gap-2 border-b border-gray-700 animate-fade-in">
+          <Search size={14} className="text-gray-500" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchTerm}
+            onChange={(e) => { setSearchTerm(e.target.value); handleSearch(e.target.value); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.shiftKey ? handleSearchPrev() : handleSearchNext(); } }}
+            placeholder="Pesquisar na página..."
+            className="flex-1 bg-[#1a1a1a] border border-gray-700 rounded px-3 py-1 text-sm text-white outline-none focus:border-cyan-500"
+          />
+          <span className="text-[10px] text-gray-500 font-bold min-w-[60px]">
+            {searchResults.matches > 0 ? `${searchResults.activeMatchOrdinal}/${searchResults.matches}` : 'Sem resultados'}
+          </span>
+          <button onClick={handleSearchPrev} className="p-1 text-gray-400 hover:text-white" title="Anterior (Shift+Enter)">
+            <ChevronUp size={14} />
+          </button>
+          <button onClick={handleSearchNext} className="p-1 text-gray-400 hover:text-white" title="Próximo (Enter)">
+            <ChevronDown size={14} />
+          </button>
+          <button onClick={closeSearch} className="p-1 text-gray-400 hover:text-red-400" title="Fechar (Esc)">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* BARRA DE PROGRESSO DE DOWNLOAD */}
       {download && (

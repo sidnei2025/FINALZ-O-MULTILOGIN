@@ -35,6 +35,49 @@ const floatingButtonWindows = new Map();
 // 🔥 ARMAZENA INSTÂNCIAS PUPPETEER PARA CONTROLE DOS BOTÕES FLUTUANTES
 const activePuppeteerInstances = new Map(); // { profileId: { browser, page } }
 
+// 🔌 CAMINHO DAS EXTENSÕES EMBUTIDAS
+function getExtensionsPath() {
+    // Tenta encontrar a pasta de extensões em diferentes locais
+    const possiblePaths = [
+        path.join(app.getAppPath(), 'extensions'),
+        path.join(process.cwd(), 'extensions'),
+        path.join(path.dirname(app.getPath('exe')), 'extensions'),
+        path.join(__dirname, '..', 'extensions')
+    ];
+
+    for (const extPath of possiblePaths) {
+        if (fs.existsSync(extPath)) {
+            console.log(`📦 [EXTENSÕES] Pasta encontrada: ${extPath}`);
+            return extPath;
+        }
+    }
+    console.log(`⚠️ [EXTENSÕES] Pasta de extensões não encontrada`);
+    return null;
+}
+
+// 🔌 FUNÇÃO PARA LISTAR TODAS AS EXTENSÕES A SEREM CARREGADAS
+function getExtensionsList() {
+    const extensionsDir = getExtensionsPath();
+    if (!extensionsDir) return [];
+
+    const extensions = [];
+    try {
+        const subdirs = fs.readdirSync(extensionsDir);
+        for (const subdir of subdirs) {
+            const extFullPath = path.join(extensionsDir, subdir);
+            const manifestPath = path.join(extFullPath, 'manifest.json');
+            // Só adiciona se for um diretório com manifest.json (extensão válida)
+            if (fs.statSync(extFullPath).isDirectory() && fs.existsSync(manifestPath)) {
+                extensions.push(extFullPath);
+                console.log(`🔌 [EXTENSÃO] Encontrada: ${subdir}`);
+            }
+        }
+    } catch (e) {
+        console.error(`❌ [EXTENSÕES] Erro ao listar extensões:`, e.message);
+    }
+    return extensions;
+}
+
 // 🍎🪟🐧 FUNÇÃO PARA ENCONTRAR O CHROME EM QUALQUER SISTEMA OPERACIONAL
 function findChromePath(customBrowserPath) {
     // Se foi passado um caminho customizado e ele existe, usa
@@ -371,6 +414,8 @@ function registerIPCHandlers() {
                 'openai.com', 'chat.openai.com',  // OpenAI/ChatGPT - OAuth
                 'claude.ai', 'anthropic.com',     // Claude - OAuth
                 'midjourney.com',                 // Midjourney - Discord OAuth
+                // 🔥 SITES COM PROTEÇÃO ANTI-BOT AVANÇADA (pulam pré-login)
+                'dankicode.com', 'cursos.dankicode.com',  // DankiCode - Anti-bot
             ];
 
             const targetUrlLower = targetUrls[0].toLowerCase();
@@ -401,11 +446,63 @@ function registerIPCHandlers() {
                             '--disable-infobars',
                             '--disable-notifications',
                             `--user-agent=${GLOBAL_UA}`,
+                            // 🔥 PROTEÇÕES ANTI-DETECÇÃO
+                            '--disable-blink-features=AutomationControlled',
+                            '--disable-features=IsolateOrigins,site-per-process',
+                            '--disable-dev-shm-usage',
+                            '--disable-accelerated-2d-canvas',
+                            '--disable-gpu',
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-web-security',
+                            '--allow-running-insecure-content',
+                            '--disable-features=TranslateUI',
+                            '--lang=pt-BR,pt',
                             proxyUrl ? `--proxy-server=${proxyUrl}` : ''
-                        ].filter(Boolean)
+                        ].filter(Boolean),
+                        // 🔥 IGNORA FLAGS DE AUTOMAÇÃO
+                        ignoreDefaultArgs: ['--enable-automation']
                     });
 
                     const page = await headlessBrowser.newPage();
+
+                    // 🔥 SCRIPTS ANTI-DETECÇÃO - executados ANTES de qualquer navegação
+                    await page.evaluateOnNewDocument(() => {
+                        // Remove webdriver
+                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+                        // Chrome API falsa
+                        window.chrome = {
+                            runtime: {},
+                            loadTimes: () => ({}),
+                            csi: () => ({})
+                        };
+
+                        // Remove propriedades de automação
+                        delete navigator.__proto__.webdriver;
+
+                        // Plugins falsos
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: () => [1, 2, 3, 4, 5].map(() => ({
+                                name: 'Chrome PDF Plugin',
+                                description: 'Portable Document Format',
+                                filename: 'internal-pdf-viewer',
+                                length: 1
+                            }))
+                        });
+
+                        // Languages
+                        Object.defineProperty(navigator, 'languages', {
+                            get: () => ['pt-BR', 'pt', 'en-US', 'en']
+                        });
+
+                        // Permissions
+                        const originalQuery = window.navigator.permissions.query;
+                        window.navigator.permissions.query = (parameters) =>
+                            parameters.name === 'notifications'
+                                ? Promise.resolve({ state: Notification.permission })
+                                : originalQuery(parameters);
+                    });
 
                     // 🎬 DETECTA URLs DE LOGIN PARA STREAMING SERVICES
                     let loginUrl = targetUrls[0];
@@ -848,12 +945,19 @@ function registerIPCHandlers() {
                 `--user-agent=${GLOBAL_UA}`,
                 // 🔒 FLAGS DE PROTEÇÃO
                 '--disable-dev-tools',                    // Desabilita DevTools (F12)
-                '--disable-extensions',                   // Desabilita extensões
                 '--disable-client-side-phishing-detection',
-                '--disable-component-extensions-with-background-pages',
                 '--disable-default-apps',
                 '--disable-features=TranslateUI',
             ];
+
+            // 🔌 CARREGA EXTENSÕES EMBUTIDAS (se existirem)
+            const extensionsList = getExtensionsList();
+            if (extensionsList.length > 0) {
+                // Formato: --load-extension=path1,path2,path3
+                const extensionsArg = `--load-extension=${extensionsList.join(',')}`;
+                chromeArgs.push(extensionsArg);
+                console.log(`🔌 [NATIVO] Carregando ${extensionsList.length} extensão(ões)`);
+            }
 
             if (proxyUrl) {
                 chromeArgs.push(`--proxy-server=${proxyUrl}`);
@@ -1087,7 +1191,6 @@ function registerIPCHandlers() {
                 '--disable-save-password-bubble',
                 '--disable-component-update',
                 '--disable-default-apps',
-                '--disable-extensions',
                 '--disable-sync',
                 // Autoplay para vídeos
                 '--autoplay-policy=no-user-gesture-required',
@@ -1099,6 +1202,14 @@ function registerIPCHandlers() {
                 // Proxy se configurado
                 proxyUrl ? `--proxy-server=${proxyUrl}` : ''
             ].filter(Boolean);
+
+            // 🔌 CARREGA EXTENSÕES EMBUTIDAS (se existirem)
+            const extensionsList = getExtensionsList();
+            if (extensionsList.length > 0) {
+                const extensionsArg = `--load-extension=${extensionsList.join(',')}`;
+                launchArgs.push(extensionsArg);
+                console.log(`🔌 [PUPPETEER] Carregando ${extensionsList.length} extensão(ões)`);
+            }
 
             // IMPORTANTE: Se houver mais de uma aba, NÃO usamos --app. 
             // O modo APP esconde a barra de abas do Chrome, impedindo o usuário de ver as outras páginas.

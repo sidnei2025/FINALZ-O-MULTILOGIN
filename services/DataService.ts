@@ -88,7 +88,22 @@ const fetchAllUsers = async (): Promise<User[]> => {
   return allUsers;
 };
 
+// 🔥 FUNÇÃO PARA INVALIDAR CACHE DE MEMÓRIA (força busca do Supabase)
+// NÃO remove localStorage para manter como fallback em caso de erro
+const invalidateMemoryCache = () => {
+  // Limpar apenas cache de memória
+  memoryCache.timestamp = 0;
+  memoryCache.profiles = null;
+  memoryCache.users = null;
+  memoryCache.settings = null;
+
+  console.log('🔄 Cache de memória invalidado! Próxima busca será do Supabase.');
+};
+
 export const DataService = {
+
+  // 🔥 EXPORTAR FUNÇÃO PARA INVALIDAR CACHE
+  invalidateCache: invalidateMemoryCache,
 
   // ============================================
   // INICIALIZAÇÃO OTIMIZADA
@@ -118,10 +133,8 @@ export const DataService = {
       const [allUsers, pRes, sRes] = await Promise.all([
         // Busca TODOS os usuários usando paginação (> 1000)
         fetchAllUsers(),
-        // Busca profiles (com ou sem filtro de userId)
-        userId
-          ? supabase.from('profiles').select('*').eq('userId', userId).order('orderIndex', { ascending: true })
-          : supabase.from('profiles').select('*').order('orderIndex', { ascending: true }),
+        // 🔥 PROFILES SÃO GLOBAIS - NUNCA FILTRAR POR userId!
+        supabase.from('profiles').select('*').order('orderIndex', { ascending: true }),
         // Busca settings
         supabase.from('settings').select('config').single()
       ]);
@@ -174,31 +187,24 @@ export const DataService = {
   },
 
   // ============================================
-  // BUSCAR PROFILES DO USUÁRIO (não todos os 250)
+  // BUSCAR TODOS OS PROFILES (profiles são globais)
   // ============================================
-  fetchUserProfiles: async (userId: string): Promise<Profile[]> => {
+  fetchUserProfiles: async (_userId?: string): Promise<Profile[]> => {
     try {
+      // 🔥 PROFILES SÃO GLOBAIS - buscar todos, não filtrar por userId
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('userId', userId)
         .order('orderIndex', { ascending: true });
 
       if (error) throw error;
 
       const profiles = data || [];
 
-      // Atualizar apenas os profiles deste usuário no cache
-      if (memoryCache.profiles) {
-        memoryCache.profiles = [
-          ...memoryCache.profiles.filter(p => p.userId !== userId),
-          ...profiles
-        ];
-      } else {
-        memoryCache.profiles = profiles;
-      }
-
+      // Atualizar cache com todos os profiles
+      memoryCache.profiles = profiles;
       memoryCache.timestamp = Date.now();
+
       return profiles;
     } catch (e) {
       console.error('Error fetching profiles:', e);
